@@ -9,9 +9,9 @@ namespace Infrastructure.DataAccess
         public async Task<int> AddAsync(MySqlConnection conn, MySqlTransaction tx, Rit rit)
         {
             string sql = @"
-INSERT INTO rit (klantID, voertuigID, datum, afstand, type, aantalPersonen, gewicht, omvang, prijs, status)
-VALUES (@klant, @voertuig, @datum, @afstand, @type, @aantal, @gewicht, NULL, @prijs, @status);
-SELECT LAST_INSERT_ID();";
+                INSERT INTO rit (klantID, voertuigID, datum, afstand, type, aantalPersonen, gewicht, omvang, prijs, status)
+                VALUES (@klant, @voertuig, @datum, @afstand, @type, @aantal, @gewicht, NULL, @prijs, @status);
+                SELECT LAST_INSERT_ID();";
 
             using var cmd = new MySqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("@klant", rit.KlantId);

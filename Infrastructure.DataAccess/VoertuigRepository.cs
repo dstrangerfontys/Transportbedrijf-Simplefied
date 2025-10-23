@@ -15,10 +15,10 @@ namespace Infrastructure.DataAccess
         {
             var list = new List<Voertuig>();
             string sql = @"
-SELECT voertuigID, type, capaciteit, kilometerstand, afschrijving, beschikbaar
-FROM voertuig
-WHERE type = @type AND capaciteit >= @cap AND beschikbaar = 1
-FOR UPDATE;";
+                SELECT voertuigID, type, capaciteit, kilometerstand, afschrijving, beschikbaar
+                FROM voertuig
+                WHERE type = @type AND capaciteit >= @cap AND beschikbaar = 1
+                FOR UPDATE;";
 
             using var cmd = new MySqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("@type", ritType == RitType.Personen ? "Personenauto" : "Vrachtauto");
@@ -53,9 +53,9 @@ FOR UPDATE;";
         public async Task UpdateStateAsync(MySqlConnection conn, MySqlTransaction tx, Voertuig v)
         {
             string sql = @"
-UPDATE voertuig
-SET kilometerstand=@km, afschrijving=@af, beschikbaar=@besch
-WHERE voertuigID=@id;";
+                UPDATE voertuig
+                SET kilometerstand=@km, afschrijving=@af, beschikbaar=@besch
+                WHERE voertuigID=@id;";
 
             using var cmd = new MySqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("@km", v.Kilometerstand);
