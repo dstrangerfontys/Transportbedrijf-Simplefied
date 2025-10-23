@@ -1,0 +1,66 @@
+﻿@page
+@model WebApp.Pages.Ritten.BoekModel
+@{
+    ViewData["Title"] = "Rit boeken";
+}
+
+<h1>Rit boeken</h1>
+
+<form method="post" class="border rounded p-4 bg-light shadow-sm">
+    <div class="mb-3">
+        <label asp-for="Input.Type" class="form-label fw-semibold">Type vervoer</label>
+        <select asp-for="Input.Type" class="form-select" id="typeSelect">
+            <option value="Personen">Personenvervoer</option>
+            <option value="Vracht">Vrachtvervoer</option>
+        </select>
+        <span asp-validation-for="Input.Type" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Input.AfstandKm" class="form-label fw-semibold">Afstand (km)</label>
+        <input asp-for="Input.AfstandKm" class="form-control" placeholder="Bijv. 150" />
+        <span asp-validation-for="Input.AfstandKm" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3 personen-group" style="display:none;">
+        <label asp-for="Input.AantalPersonen" class="form-label fw-semibold">Aantal personen</label>
+        <input asp-for="Input.AantalPersonen" class="form-control" placeholder="Bijv. 4" />
+        <span asp-validation-for="Input.AantalPersonen" class="text-danger"></span>
+    </div>
+
+    <div class="vracht-group" style="display:none;">
+        <div class="mb-3">
+            <label asp-for="Input.GewichtKg" class="form-label fw-semibold">Gewicht (kg)</label>
+            <input asp-for="Input.GewichtKg" class="form-control" placeholder="Bijv. 2500" />
+            <span asp-validation-for="Input.GewichtKg" class="text-danger"></span>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Input.Datum" class="form-label fw-semibold">Datum van rit</label>
+        <input asp-for="Input.Datum" type="date" class="form-control"
+               min="@Model.MinDateString"
+               max="@Model.MaxDateString" />
+        <span asp-validation-for="Input.Datum" class="text-danger"></span>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Rit boeken</button>
+</form>
+
+@if (!string.IsNullOrWhiteSpace(Model.Result))
+{
+    <div class="alert alert-info mt-3">@Model.Result</div>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        function toggleGroups() {
+            const val = document.getElementById('typeSelect').value;
+            document.querySelector('.personen-group').style.display = (val === 'Personen') ? 'block' : 'none';
+            document.querySelector('.vracht-group').style.display = (val === 'Vracht') ? 'block' : 'none';
+        }
+        document.getElementById('typeSelect').addEventListener('change', toggleGroups);
+        toggleGroups();
+    </script>
+}

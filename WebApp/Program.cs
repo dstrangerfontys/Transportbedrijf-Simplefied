@@ -1,25 +1,22 @@
-var builder = WebApplication.CreateBuilder(args);
+using Core.Domain;
+using Infrastructure.DataAccess;
 
-// Add services to the container.
+var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorPages();
+
+builder.Services.AddSingleton(new MySqlConnectionFactory(
+    builder.Configuration.GetConnectionString("TransportApp")!
+));
+
+builder.Services.AddScoped<VoertuigRepository>();
+builder.Services.AddScoped<RitRepository>();
+builder.Services.AddScoped<TransportPlanner>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
-}
-
 app.UseHttpsRedirection();
 app.UseStaticFiles();
-
 app.UseRouting();
-
-app.UseAuthorization();
-
 app.MapRazorPages();
 
 app.Run();
