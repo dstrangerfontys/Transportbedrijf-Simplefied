@@ -1,0 +1,32 @@
+﻿@page
+@model WebApp.Pages.Ritten.AfrondenModel
+@{
+    ViewData["Title"] = "Rit afronden";
+}
+
+<h1>Rit afronden</h1>
+
+<form method="post" class="border rounded p-4 bg-light shadow-sm">
+    <div class="mb-3">
+        <label asp-for="RitId" class="form-label fw-semibold">Rit ID</label>
+        <input asp-for="RitId" class="form-control" />
+        <span asp-validation-for="RitId" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="GeredenKm" class="form-label fw-semibold">Gereden kilometers</label>
+        <input asp-for="GeredenKm" class="form-control" />
+        <span asp-validation-for="GeredenKm" class="text-danger"></span>
+    </div>
+
+    <button type="submit" class="btn btn-success">Afronden</button>
+</form>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="alert alert-info mt-3">@Model.Message</div>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

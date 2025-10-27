@@ -1,0 +1,40 @@
+﻿@page
+@model WebApp.Pages.Voertuigen.OverzichtModel
+@{
+    ViewData["Title"] = "Voertuigenoverzicht";
+}
+
+<h1>Voertuigenoverzicht</h1>
+
+@if (Model.Voertuigen.Count == 0)
+{
+    <div class="alert alert-info">Er zijn momenteel geen voertuigen geregistreerd.</div>
+}
+else
+{
+    <table class="table table-striped table-bordered">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Capaciteit</th>
+                <th>Kilometerstand</th>
+                <th>Afschrijving (%)</th>
+                <th>Beschikbaar</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var v in Model.Voertuigen)
+            {
+                <tr>
+                    <td>@v.Id</td>
+                    <td>@(v.Type == Core.Domain.VoertuigType.Personenauto ? "Personenauto" : "Vrachtauto")</td>
+                    <td>@v.Capaciteit</td>
+                    <td>@v.Kilometerstand</td>
+                    <td>@v.AfschrijvingPercent.ToString("0.00")</td>
+                    <td>@(v.Beschikbaar ? "Ja" : "Nee")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

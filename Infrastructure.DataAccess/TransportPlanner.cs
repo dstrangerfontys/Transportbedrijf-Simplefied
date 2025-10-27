@@ -7,12 +7,12 @@ using MySql.Data.MySqlClient;
 namespace Infrastructure.DataAccess
 {
     /// De TransportPlanner is verantwoordelijk voor het plannen en afronden van ritten.
-    /// Hij vormt de schakel tussen de domeinlaag (Core.Domain) en de database (Infrastructure).
+    /// Dit vormt de schakel tussen de domeinlaag (Core.Domain) en de database (Infrastructure).
     public class TransportPlanner
     {
-        private readonly MySqlConnectionFactory _factory;   // Maakt connecties aan met de database
-        private readonly VoertuigRepository _voertuigen;    // Behandelt database-operaties voor voertuigen
-        private readonly RitRepository _ritten;             // Behandelt database-operaties voor ritten
+        private readonly MySqlConnectionFactory _factory;   // Maakt DB-connecties
+        private readonly VoertuigRepository _voertuigen;    // DB-operaties voor voertuigen
+        private readonly RitRepository _ritten;             // DB-operaties voor ritten
 
         public TransportPlanner(MySqlConnectionFactory factory, VoertuigRepository vRepo, RitRepository rRepo)
         {
@@ -22,44 +22,53 @@ namespace Infrastructure.DataAccess
         }
 
         /// Plant een nieuwe rit op basis van een rit-aanvraag.
-        /// 1. Zoekt een geschikt voertuig
-        /// 2. Reserveert dit voertuig
-        /// 3. Maakt een nieuwe rit aan
-        /// 4. Slaat de rit op in de database
+        /// 1 Zoek een geschikt en beschikbaar voertuig
+        /// 2 Reserveer voertuig (beschikbaar -> false)
+        /// 3 Maak rit aan (status "Gepland"), bereken prijs
+        /// 4 Sla op en commit
+        /// 
+        /// Als er géén voertuig is:
+        /// - log een rij met status "Afgewezen"
         public async Task<Rit?> PlanAsync(RitAanvraag aanvraag)
         {
-            // Maak een nieuwe databaseconnectie aan
             using var conn = _factory.Create();
             await conn.OpenAsync();
 
-            // Start een database-transactie (zodat alles of niets wordt opgeslagen)
+            // Gebruik transactie zodat selectie en reservering consistent gebeuren
             using var tx = await conn.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted) as MySqlTransaction;
 
             try
             {
-                // Bepaal wat "capaciteit" betekent:
-                // - Bij personenritten is dat aantal personen
-                // - Bij vrachtritten is dat het gewicht
+                // Vereiste capaciteit: bij Personen = aantalPersonen, bij Vracht = gewicht (kg)
                 int cap = aanvraag.Type == RitType.Personen
                     ? (aanvraag.AantalPersonen ?? 0)
                     : (aanvraag.GewichtKg ?? 0);
 
-                // Vraag geschikte, beschikbare voertuigen op
+                // Kandidaten zoeken (rijen worden vergrendeld met FOR UPDATE in de repo)
                 var kandidaten = await _voertuigen.GetGeschiktEnBeschikbaarAsync(conn, tx!, aanvraag.Type, cap);
                 var voertuig = kandidaten.FirstOrDefault();
 
-                // Geen voertuig beschikbaar? => Transactie rollbacken en null teruggeven
+                // === GEEN VOERTUIG → log "Afgewezen" en commit ===
                 if (voertuig is null)
                 {
-                    await tx!.RollbackAsync();
-                    return null;
+                    await _ritten.AddRejectedAsync(
+                        conn, tx!,
+                        klantId: aanvraag.KlantId,
+                        datum: aanvraag.Datum,
+                        type: aanvraag.Type,
+                        afstandKm: aanvraag.AfstandKm,
+                        aantalPersonen: aanvraag.AantalPersonen,
+                        gewichtKg: aanvraag.GewichtKg
+                    );
+
+                    await tx!.CommitAsync();   // afwijzing definitief opslaan
+                    return null;               // UI toont dan "aanvraag afgewezen"
                 }
 
-                // Reserveer het voertuig (zet beschikbaarheid op false)
+                // === Wel voertuig → reserveren en rit plannen ===
                 voertuig.Reserveer();
                 await _voertuigen.UpdateStateAsync(conn, tx!, voertuig);
 
-                // Maak een nieuwe rit aan met status "Gepland"
                 var rit = new Rit(
                     id: 0,
                     klantId: aanvraag.KlantId,
@@ -69,16 +78,12 @@ namespace Infrastructure.DataAccess
                     afstandKm: aanvraag.AfstandKm,
                     aantalPersonen: aanvraag.AantalPersonen,
                     gewichtKg: aanvraag.GewichtKg,
-                    status: "Gepland" // <-- belangrijk, voorkomt 'None'-fouten
+                    status: "Gepland"
                 );
 
-                // Bereken prijs op basis van type en afstand
-                rit.BerekenPrijs();
+                rit.BerekenPrijs(); // prijs: Personen = km * 1.0m, Vracht = km * 2.0m
 
-                // Voeg rit toe aan de database en ontvang nieuw ID
                 var newId = await _ritten.AddAsync(conn, tx!, rit);
-
-                // Maak nieuwe instantie met het ID dat de database heeft gegenereerd
                 rit = new Rit(
                     id: newId,
                     klantId: rit.KlantId,
@@ -92,23 +97,19 @@ namespace Infrastructure.DataAccess
                     prijs: rit.Prijs
                 );
 
-                // Transactie committen: alle wijzigingen definitief opslaan
                 await tx!.CommitAsync();
-
-                // Rit teruggeven aan de UI-laag
                 return rit;
             }
             catch
             {
-                // Iets ging mis → alle wijzigingen terugdraaien
                 await tx!.RollbackAsync();
                 throw;
             }
         }
 
         /// Rondt een rit af:
-        /// 1. Laadt de rit en het voertuig
-        /// 2. Werkt kilometerstand & afschrijving bij
+        /// 1. Laadt de rit en vergrendelt het voertuig
+        /// 2. Werkt kilometerstand & afschrijving bij (incl. belading-regel 90% voor vracht)
         /// 3. Zet status van rit op "Afgerond"
         public async Task VoltooiRitAsync(int ritId, int geredenKm)
         {
@@ -118,7 +119,7 @@ namespace Infrastructure.DataAccess
 
             try
             {
-                // Haal rit op uit de database
+                // Rit ophalen
                 var rit = await _ritten.GetByIdAsync(conn, tx, ritId);
                 if (rit is null)
                 {
@@ -126,14 +127,14 @@ namespace Infrastructure.DataAccess
                     return;
                 }
 
-                // Vergrendel het voertuig zodat geen andere transactie het tegelijk kan aanpassen
+                // Vergrendel voertuig-rij om race conditions te voorkomen
                 using (var lockCmd = new MySqlCommand("SELECT 1 FROM voertuig WHERE voertuigID=@id FOR UPDATE;", conn, tx))
                 {
                     lockCmd.Parameters.AddWithValue("@id", rit.VoertuigId);
                     await lockCmd.ExecuteNonQueryAsync();
                 }
 
-                // Laad voertuiggegevens
+                // Voertuig laden
                 Voertuig? v = null;
                 using (var cmd = new MySqlCommand("SELECT * FROM voertuig WHERE voertuigID=@id;", conn, tx))
                 {
@@ -142,7 +143,6 @@ namespace Infrastructure.DataAccess
 
                     if (await rdr.ReadAsync())
                     {
-                        // Ordinals verbeteren performance (sneller dan strings)
                         int oVoertuigId = rdr.GetOrdinal("voertuigID");
                         int oType = rdr.GetOrdinal("type");
                         int oCapaciteit = rdr.GetOrdinal("capaciteit");
@@ -150,11 +150,9 @@ namespace Infrastructure.DataAccess
                         int oAfschrijving = rdr.GetOrdinal("afschrijving");
                         int oBeschikbaar = rdr.GetOrdinal("beschikbaar");
 
-                        // Zet type-tekst om naar enum
                         var typeStr = rdr.IsDBNull(oType) ? "" : rdr.GetString(oType);
                         var type = typeStr == "Personenauto" ? VoertuigType.Personenauto : VoertuigType.Vrachtauto;
 
-                        // Maak voertuigobject
                         v = new Voertuig(
                             rdr.GetInt32(oVoertuigId),
                             type,
@@ -166,29 +164,28 @@ namespace Infrastructure.DataAccess
                     }
                 }
 
-                // Geen voertuig gevonden? -> transactie terugdraaien
                 if (v is null)
                 {
                     await tx!.RollbackAsync();
                     return;
                 }
 
-                // Bereken afschrijving en kilometerstand op basis van gereden km
+                // Afschrijving & km bijwerken
                 int? belading = rit.Type == RitType.Vracht ? rit.GewichtKg : null;
                 v.RijdEnSchrijfAf(geredenKm, belading);
-                v.Vrijgeven(); // voertuig weer beschikbaar maken
+
+                // Voertuig vrijgeven en opslaan
+                v.Vrijgeven();
                 await _voertuigen.UpdateStateAsync(conn, tx!, v);
 
-                // Werk ritstatus bij naar "Afgerond"
+                // Rit-status bijwerken
                 rit.Afronden();
                 await _ritten.UpdateAsync(conn, tx!, rit);
 
-                // Alle wijzigingen committen
                 await tx!.CommitAsync();
             }
             catch
             {
-                // Iets fout gegaan -> rollback
                 await tx!.RollbackAsync();
                 throw;
             }

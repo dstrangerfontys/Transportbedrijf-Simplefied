@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Core.Domain;
 using MySql.Data.MySqlClient;
 
@@ -22,7 +23,6 @@ namespace Infrastructure.DataAccess
         {
             var list = new List<Voertuig>();
 
-            // FOR UPDATE: belangrijk bij planning, voorkomt dat twee transacties hetzelfde voertuig kiezen
             string sql = @"
                 SELECT voertuigID, type, capaciteit, kilometerstand, afschrijving, beschikbaar
                 FROM voertuig
@@ -30,14 +30,11 @@ namespace Infrastructure.DataAccess
                 FOR UPDATE;";
 
             using var cmd = new MySqlCommand(sql, conn, tx);
-
-            // In de DB is 'type' een string-veld: "Personenauto" of "Vrachtauto"
             cmd.Parameters.AddWithValue("@type", ritType == RitType.Personen ? "Personenauto" : "Vrachtauto");
             cmd.Parameters.AddWithValue("@cap", vereisteCapaciteit);
 
             using var rdr = await cmd.ExecuteReaderAsync();
 
-            // Ordinals eenmaal bepalen voor performance (niet verplicht, wel netter)
             int oVoertuigId = rdr.GetOrdinal("voertuigID");
             int oType = rdr.GetOrdinal("type");
             int oCapaciteit = rdr.GetOrdinal("capaciteit");
@@ -47,20 +44,19 @@ namespace Infrastructure.DataAccess
 
             while (await rdr.ReadAsync())
             {
-                // Type-string naar enum
                 var typeStr = rdr.IsDBNull(oType) ? "" : rdr.GetString(oType);
                 var type = typeStr == "Personenauto" ? VoertuigType.Personenauto : VoertuigType.Vrachtauto;
 
-                // Domeinobject opbouwen
                 list.Add(new Voertuig(
                     id: rdr.GetInt32(oVoertuigId),
                     type: type,
                     capaciteit: rdr.GetInt32(oCapaciteit),
                     kilometerstand: rdr.GetInt32(oKilometer),
                     afschrijvingPercent: rdr.GetDecimal(oAfschrijving),
-                    beschikbaar: rdr.GetBoolean(oBeschikbaar) // MySQL TINYINT(1) mapt naar bool
+                    beschikbaar: rdr.GetBoolean(oBeschikbaar)
                 ));
             }
+
             return list;
         }
 
@@ -78,10 +74,48 @@ namespace Infrastructure.DataAccess
             using var cmd = new MySqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("@km", v.Kilometerstand);
             cmd.Parameters.AddWithValue("@af", v.AfschrijvingPercent);
-            cmd.Parameters.AddWithValue("@besch", v.Beschikbaar ? 1 : 0); // boolean → 1/0
+            cmd.Parameters.AddWithValue("@besch", v.Beschikbaar ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", v.Id);
 
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// Haalt ALLE voertuigen op (zonder FOR UPDATE),
+        /// bedoeld voor weergave in het overzichtsscherm.
+        public async Task<List<Voertuig>> GetAllAsync(MySqlConnection conn)
+        {
+            var list = new List<Voertuig>();
+            const string sql = @"
+                SELECT voertuigID, type, capaciteit, kilometerstand, afschrijving, beschikbaar
+                FROM voertuig
+                ORDER BY voertuigID;";
+
+            using var cmd = new MySqlCommand(sql, conn);
+            using var rdr = await cmd.ExecuteReaderAsync();
+
+            int oVoertuigId = rdr.GetOrdinal("voertuigID");
+            int oType = rdr.GetOrdinal("type");
+            int oCapaciteit = rdr.GetOrdinal("capaciteit");
+            int oKilometer = rdr.GetOrdinal("kilometerstand");
+            int oAfschrijving = rdr.GetOrdinal("afschrijving");
+            int oBeschikbaar = rdr.GetOrdinal("beschikbaar");
+
+            while (await rdr.ReadAsync())
+            {
+                var typeStr = rdr.IsDBNull(oType) ? "" : rdr.GetString(oType);
+                var type = typeStr == "Personenauto" ? VoertuigType.Personenauto : VoertuigType.Vrachtauto;
+
+                list.Add(new Voertuig(
+                    id: rdr.GetInt32(oVoertuigId),
+                    type: type,
+                    capaciteit: rdr.GetInt32(oCapaciteit),
+                    kilometerstand: rdr.GetInt32(oKilometer),
+                    afschrijvingPercent: rdr.GetDecimal(oAfschrijving),
+                    beschikbaar: rdr.GetBoolean(oBeschikbaar)
+                ));
+            }
+
+            return list;
         }
     }
 }

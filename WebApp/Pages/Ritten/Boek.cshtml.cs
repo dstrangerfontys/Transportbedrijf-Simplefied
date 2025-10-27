@@ -55,7 +55,7 @@ namespace WebApp.Pages.Ritten
                 return Page();
             }
 
-            // Tijdelijke klantId (geen login)
+            // Tijdelijke klantId
             int klantId = 1;
 
             var aanvraag = new RitAanvraag
@@ -77,28 +77,32 @@ namespace WebApp.Pages.Ritten
             }
             catch (Exception ex)
             {
-                Result = $"Er is een fout opgetreden bij het plannen van de rit: {ex.Message}";
+                Result =
+                    $"Er is een fout opgetreden bij het plannen van de rit:<br/>" +
+                    $"{ex.GetType().Name}: {ex.Message}<br/>" +
+                    $"<pre style=\"white-space:pre-wrap\">{ex.StackTrace}</pre>";
+                return Page();
             }
 
             return Page();
         }
-    }
 
-    public class RitInputViewModel
-    {
-        [Required(ErrorMessage = "Kies een type.")]
-        public string Type { get; set; } = "Personen";
+        public class RitInputViewModel
+        {
+            [Required(ErrorMessage = "Kies een type.")]
+            public string Type { get; set; } = "Personen";
 
-        [Required(ErrorMessage = "Voer een afstand in.")]
-        [Range(1, int.MaxValue, ErrorMessage = "Afstand moet groter zijn dan 0.")]
-        public int AfstandKm { get; set; }
+            [Required(ErrorMessage = "Voer een afstand in.")]
+            [Range(1, int.MaxValue, ErrorMessage = "Afstand moet groter zijn dan 0.")]
+            public int AfstandKm { get; set; }
 
-        public int? AantalPersonen { get; set; }
+            public int? AantalPersonen { get; set; }
 
-        public int? GewichtKg { get; set; }
+            public int? GewichtKg { get; set; }
 
-        [Required(ErrorMessage = "Kies een datum.")]
-        [DataType(DataType.Date)]
-        public DateTime Datum { get; set; }
+            [Required(ErrorMessage = "Kies een datum.")]
+            [DataType(DataType.Date)]
+            public DateTime Datum { get; set; }
+        }
     }
 }

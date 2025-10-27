@@ -6,14 +6,30 @@ namespace Infrastructure.DataAccess
 {
     /// Data-toegang voor de tabel 'rit'.
     /// Schrijft/Leest ritten en houdt dit strikt bij één transactie en connectie,
-    /// die van buitenaf worden meegegeven (geen eigen verbinding openen hier).
+    /// die van buitenaf worden meegegeven.
     public class RitRepository
     {
+        /// Veilige mapper: zet de DB-string (rit.type) om naar RitType enum.
+        /// Gooit een exception als de waarde onbekend is.
+        private static RitType MapRitType(string? dbValue)
+        {
+            var s = (dbValue ?? string.Empty).Trim();
+            return s switch
+            {
+                "Personen" => RitType.Personen,
+                "Vracht" => RitType.Vracht,
+                _ => throw new InvalidOperationException(
+                        $"Onbekende waarde voor kolom 'rit.type' uit de database: '{dbValue}'. " +
+                        "Verwacht 'Personen' of 'Vracht'."
+                    )
+            };
+        }
+
         /// Voegt een nieuwe rit toe en retourneert het nieuwe ID (LAST_INSERT_ID()).
         public async Task<int> AddAsync(MySqlConnection conn, MySqlTransaction tx, Rit rit)
         {
-            // SQL met parameters (voorkomt SQL-injectie; duidelijke kolomnamen)
-            string sql = @"
+            // SQL met parameters
+            const string sql = @"
                 INSERT INTO rit (klantID, voertuigID, datum, afstand, type, aantalPersonen, gewicht, omvang, prijs, status)
                 VALUES (@klant, @voertuig, @datum, @afstand, @type, @aantal, @gewicht, NULL, @prijs, @status);
                 SELECT LAST_INSERT_ID();";
@@ -29,14 +45,13 @@ namespace Infrastructure.DataAccess
             // DB bewaart 'type' als string: "Personen" of "Vracht"
             cmd.Parameters.AddWithValue("@type", rit.Type == RitType.Personen ? "Personen" : "Vracht");
 
-            // Nullable velden netjes als NULL wegschrijven wanneer niet aanwezig
+            // Nullable velden als NULL wegschrijven wanneer niet aanwezig
             cmd.Parameters.AddWithValue("@aantal", (object?)rit.AantalPersonen ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@gewicht", (object?)rit.GewichtKg ?? DBNull.Value);
 
+            // Prijs & status
             cmd.Parameters.AddWithValue("@prijs", rit.Prijs);
-
-            // Status moet altijd een geldige waarde zijn (bijv. "Gepland")
-            cmd.Parameters.AddWithValue("@status", rit.Status);
+            cmd.Parameters.AddWithValue("@status", string.IsNullOrWhiteSpace(rit.Status) ? "Gepland" : rit.Status);
 
             // ExecuteScalarAsync om het ID terug te krijgen
             var result = await cmd.ExecuteScalarAsync();
@@ -53,7 +68,7 @@ namespace Infrastructure.DataAccess
             using var rdr = await cmd.ExecuteReaderAsync();
             if (!await rdr.ReadAsync()) return null;
 
-            // Ordinals (kolomindexen) 1x opvragen is iets sneller dan telkens op naam
+            // Kolomindexen 1x opvragen
             int oRitId = rdr.GetOrdinal("ritID");
             int oKlantId = rdr.GetOrdinal("klantID");
             int oVoertuigId = rdr.GetOrdinal("voertuigID");
@@ -65,11 +80,11 @@ namespace Infrastructure.DataAccess
             int oStatus = rdr.GetOrdinal("status");
             int oPrijs = rdr.GetOrdinal("prijs");
 
-            // Type-string vertalen naar onze domein-enum
-            var typeStr = rdr.IsDBNull(oType) ? "" : rdr.GetString(oType);
-            var type = typeStr == "Personen" ? RitType.Personen : RitType.Vracht;
+            // Type-string vertalen naar domein-enum
+            var typeStr = rdr.IsDBNull(oType) ? null : rdr.GetString(oType);
+            var type = MapRitType(typeStr);
 
-            // Nullable kolommen veilig uitlezen
+            // Nullable kolommen uitlezen
             int? aantal = rdr.IsDBNull(oAantalPersonen) ? (int?)null : rdr.GetInt32(oAantalPersonen);
             int? gewicht = rdr.IsDBNull(oGewicht) ? (int?)null : rdr.GetInt32(oGewicht);
 
@@ -91,13 +106,45 @@ namespace Infrastructure.DataAccess
         /// Update de prijs en de status van een bestaande rit.
         public async Task UpdateAsync(MySqlConnection conn, MySqlTransaction tx, Rit rit)
         {
-            // Alleen velden updaten die functioneel mogen veranderen na plannen
-            using var cmd = new MySqlCommand("UPDATE rit SET prijs=@p, status=@s WHERE ritID=@id;", conn, tx);
+            // Alleen velden updaten die mogen veranderen na plannen
+            const string sql = "UPDATE rit SET prijs=@p, status=@s WHERE ritID=@id;";
+            using var cmd = new MySqlCommand(sql, conn, tx);
+
             cmd.Parameters.AddWithValue("@p", rit.Prijs);
-            cmd.Parameters.AddWithValue("@s", rit.Status);
+            cmd.Parameters.AddWithValue("@s", string.IsNullOrWhiteSpace(rit.Status) ? "Gepland" : rit.Status);
             cmd.Parameters.AddWithValue("@id", rit.Id);
 
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// Logt een afgewezen rit-aanvraag in de Database.
+        /// Vereist dat 'voertuigID' NULL mag zijn in de tabel 'rit'.
+        public async Task<int> AddRejectedAsync(
+            MySqlConnection conn,
+            MySqlTransaction tx,
+            int klantId,
+            DateTime datum,
+            RitType type,
+            int afstandKm,
+            int? aantalPersonen,
+            int? gewichtKg)
+        {
+            const string sql = @"
+                INSERT INTO rit (klantID, voertuigID, datum, afstand, type, aantalPersonen, gewicht, omvang, prijs, status)
+                VALUES (@klant, NULL, @datum, @afstand, @type, @aantal, @gewicht, NULL, @prijs, 'Afgewezen');
+                SELECT LAST_INSERT_ID();";
+
+            using var cmd = new MySqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("@klant", klantId);
+            cmd.Parameters.AddWithValue("@datum", datum);
+            cmd.Parameters.AddWithValue("@afstand", afstandKm);
+            cmd.Parameters.AddWithValue("@type", type == RitType.Personen ? "Personen" : "Vracht");
+            cmd.Parameters.AddWithValue("@aantal", (object?)aantalPersonen ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@gewicht", (object?)gewichtKg ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@prijs", 0m); // Afgewezen = geen prijs
+
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result);
         }
     }
 }
